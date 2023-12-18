@@ -8,6 +8,8 @@ const { v4: uuidv4 } = require('uuid')
 
 const ARRAY_IMAGE = ['/assets/example1.webp'] // Example of image locally, can also change to image online
 
+const TEMP_PATH_IMAGE = `temp`
+
 function doFunc(alpha, j, w) {
   const alphaMatte = alpha / 255.0
   const res = (j - alphaMatte * w) / (1 - alphaMatte).toFixed(2)
@@ -18,13 +20,13 @@ function doFunc(alpha, j, w) {
   return res
 }
 
-async function doWhoop(rawImage, maskIndex) {
+async function doRemove(rawImage, watermarkIndex) {
   const { width, height } = rawImage.bitmap
 
   await new Promise((resolve) => {
     rawImage.scan(0, 0, width, height, (x, y, idx) => {
-      if (typeof maskIndex[x] === 'object' && typeof maskIndex[x][y] === 'object') {
-        const { red, green, blue, alpha } = maskIndex[x][y]
+      if (typeof watermarkIndex[x] === 'object' && typeof watermarkIndex[x][y] === 'object') {
+        const { red, green, blue, alpha } = watermarkIndex[x][y]
 
         if (alpha > 0) {
           const xred = rawImage.bitmap.data[idx + 0]
@@ -35,11 +37,8 @@ async function doWhoop(rawImage, maskIndex) {
           const avgG = doFunc(alpha, xgreen, green)
           const avgB = doFunc(alpha, xblue, blue)
 
-          // eslint-disable-next-line no-param-reassign
           rawImage.bitmap.data[idx + 0] = Math.round(avgR)
-          // eslint-disable-next-line no-param-reassign
           rawImage.bitmap.data[idx + 1] = Math.round(avgG)
-          // eslint-disable-next-line no-param-reassign
           rawImage.bitmap.data[idx + 2] = Math.round(avgB)
         }
       }
@@ -51,55 +50,61 @@ async function doWhoop(rawImage, maskIndex) {
   })
 }
 
-async function removeAndAdd(rawImage, maskImage) {
+async function removeWatermark(rawImage, watermarkImage) {
   let width
   let height
-  if (rawImage.bitmap.width !== maskImage.bitmap.width) {
+  if (rawImage.bitmap.width !== watermarkImage.bitmap.width) {
     width = rawImage.bitmap.width
   }
-  if (rawImage.bitmap.height !== maskImage.bitmap.height) {
+  if (rawImage.bitmap.height !== watermarkImage.bitmap.height) {
     height = rawImage.bitmap.height
   }
 
   if (width && height) {
-    maskImage.resize(width, height)
+    watermarkImage.resize(width, height)
   }
 
-  const maskIndex = {}
+  const watermarkIndex = {}
   await new Promise((resolve) => {
-    maskImage.scan(0, 0, maskImage.bitmap.width, maskImage.bitmap.height, (x, y, idx) => {
-      const red = maskImage.bitmap.data[idx + 0]
-      const green = maskImage.bitmap.data[idx + 1]
-      const blue = maskImage.bitmap.data[idx + 2]
-      const alpha = maskImage.bitmap.data[idx + 3]
+    watermarkImage.scan(
+      0,
+      0,
+      watermarkImage.bitmap.width,
+      watermarkImage.bitmap.height,
+      (x, y, idx) => {
+        const red = watermarkImage.bitmap.data[idx + 0]
+        const green = watermarkImage.bitmap.data[idx + 1]
+        const blue = watermarkImage.bitmap.data[idx + 2]
+        const alpha = watermarkImage.bitmap.data[idx + 3]
 
-      if (alpha > 0) {
-        if (maskIndex[x] === undefined) {
-          maskIndex[x] = {}
+        if (alpha > 0) {
+          if (watermarkIndex[x] === undefined) {
+            watermarkIndex[x] = {}
+          }
+          watermarkIndex[x][y] = { red, green, blue, alpha }
         }
-        maskIndex[x][y] = { red, green, blue, alpha }
-      }
 
-      if (x === maskImage.bitmap.width - 1 && y === maskImage.bitmap.height - 1) {
-        resolve()
+        if (x === watermarkImage.bitmap.width - 1 && y === watermarkImage.bitmap.height - 1) {
+          resolve()
+        }
       }
-    })
+    )
   })
-  await doWhoop(rawImage, maskIndex)
+  await doRemove(rawImage, watermarkIndex)
   return true
 }
 
 async function saveRemoveWatermark(pathImage) {
   const rawImage = await jimp.read(`${process.cwd()}${pathImage}`)
   const dataName = `${uuidv4()}_${new Date().getTime()}.webp`
-  const tempPath = `temp`
-  if (!fs.existsSync(path.resolve(tempPath))) {
-    fs.mkdirSync(path.resolve(tempPath), { recursive: true })
-  }
-  const filePath = path.resolve(`${tempPath}/${dataName}`)
 
-  const maskImage = await jimp.read(`${process.cwd()}/assets/watermarkExample.png`)
-  await removeAndAdd(rawImage, maskImage)
+  if (!fs.existsSync(path.resolve(TEMP_PATH_IMAGE))) {
+    fs.mkdirSync(path.resolve(TEMP_PATH_IMAGE), { recursive: true })
+  }
+  const filePath = path.resolve(`${TEMP_PATH_IMAGE}/${dataName}`)
+
+  const watermarkImage = await jimp.read(`${process.cwd()}/assets/watermarkExample.png`)
+  await removeWatermark(rawImage, watermarkImage)
 
   await rawImage.writeAsync(filePath)
 }
